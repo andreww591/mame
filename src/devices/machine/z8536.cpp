@@ -636,7 +636,10 @@ void cio_base_device::write_register(offs_t offset, u8 data)
 
 	case PORT_A_HANDSHAKE_SPECIFICATION:
 	case PORT_B_HANDSHAKE_SPECIFICATION:
-		// TODO
+		// TODO: handshake modes are not emulated, but the register must read back
+		// what was written (the Commodore 900 boot ROM walks a 1 through every bit)
+		LOG("%s CIO Port %c Handshake Specification: %02x\n", machine().describe_context(), BIT(offset, 3) ? 'B' : 'A', data);
+		m_register[offset] = data;
 		break;
 
 	case PORT_A_DATA_PATH_POLARITY:
