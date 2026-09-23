@@ -8,7 +8,7 @@ UNIX prototype
 http://www.zimmers.net/cbmpics/c900.html
 http://www.zimmers.net/cbmpics/cbm/900/c900-chips.txt
 
-Chips: Z8001 CPU, Z8010 MMU, Z8030 SCC, Z8036 CIO. Crystal: 12MHz
+Chips: Z8001 CPU, Z8010 MMU, Z8030 SCC, 2x Z8036 CIO (U78 at I/O 0x00, U66 at I/O 0x80). Crystal: 12MHz
 
 The Z8030 runs 2 serial ports. The Z8036 runs the IEEE interface and the speaker.
 
@@ -104,7 +104,11 @@ bool c900_state::translate_addr(int spacenum, bool write, offs_t &offset)
 {
 	bool stack_access = (spacenum == z8001_device::AS_STACK);
 
-	//offset <<= 1;
+	// virt_r/virt_w are 16-bit handlers on a 16-bit wide space, so 'offset' is a
+	// word offset (byte address >> 1).  The MMU translates byte addresses (segment
+	// number in bits 16-22, offset in bits 0-15), and the physical bank device's
+	// read16/write16 take word offsets again, so convert here and convert back.
+	offset <<= 1;
 
 	offs_t mmu_offset = offset & ~NON_MMU_MASK;
 
@@ -119,12 +123,12 @@ bool c900_state::translate_addr(int spacenum, bool write, offs_t &offset)
 
 	LOG("%s MMU MEM REQ (space %d): %06x\n", machine().describe_context(), spacenum, offset);
 
-	offset &= 0x3f'ffff;	// Mask off seg bit 7 to disable URS checking in MMUs
+	mmu_offset &= 0x3f'ffff;	// Mask off seg bit 6 to disable URS checking in MMUs
 
 	if (!m_mmu->translate(mmu_offset, write, true, m_dma_on, st)){
 		mmu_offset = 0;
 	}
-	offset = mmu_offset | (offset & NON_MMU_MASK);
+	offset = (mmu_offset | (offset & NON_MMU_MASK)) >> 1;
 	return true;
 }
 
