@@ -163,6 +163,7 @@ void c900_state::virt_data_map(address_map &map)
 void c900_state::io_map(address_map &map)
 {
 	map(0x0000, 0x007f).rw("cio", FUNC(z8036_device::read), FUNC(z8036_device::write)).umask16(0x00ff);
+	map(0x0080, 0x00ff).rw("cio2", FUNC(z8036_device::read), FUNC(z8036_device::write)).umask16(0x00ff);
 	map(0x0100, 0x013f).rw("scc", FUNC(scc8030_device::zbus_r), FUNC(scc8030_device::zbus_w)).umask16(0x00ff);
 }
 
@@ -260,6 +261,8 @@ void c900_state::c900(machine_config &config)
 
 	z8036_device &cio(Z8036(config, "cio", 12_MHz_XTAL / 16)); // SNDCLK = 750kHz
 	cio.pb_wr_cb().set(FUNC(c900_state::sound_pb_w));
+
+	Z8036(config, "cio2", 12_MHz_XTAL / 16); // U66, tested by the boot ROM as "CIO2"; IEEE-488 interface?
 
 	scc8030_device &scc(SCC8030(config, "scc", 12_MHz_XTAL / 2)); // 5'850'000 is the ideal figure
 	/* Port B */
