@@ -4867,7 +4867,11 @@ void z8002_device::Z7B_0000_1001()
 void z8002_device::Z7B_0000_1010()
 {
 	CHECK_PRIVILEGED_INSTR();
-	/* test mu-I line */
+	/* test mu-I line: S is set if MI is high (inactive), cleared if MI is low (active) */
+	if (m_mi)
+		CLR_S;
+	else
+		SET_S;
 }
 
 /******************************************
