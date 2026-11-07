@@ -99,6 +99,9 @@ void c900_state::machine_start()
 
 void c900_state::machine_reset()
 {
+	// _CS is low during reset on this board, which makes the MMU come up with its master
+	// enable set and translation off, i.e. passing addresses straight through
+	m_mmu->write(0x00, 0x80);
 	m_normal_mode = false;
 }
 
