@@ -123,6 +123,9 @@ bool c900_state::translate_addr(int spacenum, bool write, offs_t &offset)
 
 	LOG("%s MMU MEM REQ (space %d): %06x\n", machine().describe_context(), spacenum, offset);
 
+	if (st == z8002_device::ST_IFETCH_1)
+		m_mmu->ifetch1_observed(offset);
+
 	mmu_offset &= 0x3f'ffff;	// Mask off seg bit 6 to disable URS checking in MMUs
 
 	if (!m_mmu->translate(mmu_offset, write, true, m_dma_on, st))
