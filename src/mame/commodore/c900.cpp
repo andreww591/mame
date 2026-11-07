@@ -248,7 +248,7 @@ void c900_state::c900(machine_config &config)
 	m_maincpu->set_addrmap(z8001_device::AS_SIO, &c900_state::special_io_map);
 	m_maincpu->segtack().set(FUNC(c900_state::segtack_r));
 
-	ADDRESS_MAP_BANK(config, m_physmem).set_map(&c900_state::phys_mem_map).set_options(ENDIANNESS_BIG, 16, 23, 0x100'0000);
+	ADDRESS_MAP_BANK(config, m_physmem).set_map(&c900_state::phys_mem_map).set_options(ENDIANNESS_BIG, 16, 24, 0x100'0000);
 
 	Z8010(config, m_mmu, 12_MHz_XTAL / 2);
 	m_mmu->out_segt_cb().set(FUNC(c900_state::segt_interrupt));
