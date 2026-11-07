@@ -116,8 +116,7 @@ void c900_state::phys_mem_map(address_map &map)
 	// ROM relies on reading back FFFF to fall back to the serial console
 	map.unmap_value_high();
 	map(0x000000, 0x007fff).rom().region("roms", 0);
-	map(0x080000, 0x0fffff).ram();
-	//map(0x3f0000, 0x3f1fff).ram();
+	map(0x080000, 0x17ffff).ram(); // 1 MB motherboard DRAM
 }
 
 #define NON_MMU_MASK 0x1ff
