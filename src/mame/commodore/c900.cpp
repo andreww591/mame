@@ -59,6 +59,10 @@ public:
 
 	void c900(machine_config &config);
 
+protected:
+	virtual void machine_start() override ATTR_COLD;
+	virtual void machine_reset() override ATTR_COLD;
+
 private:
 	void sound_pb_w(u8 data);
 
@@ -74,6 +78,7 @@ private:
 	void virt_w(address_space &space, offs_t offset, uint16_t data, uint16_t mask);
 	uint16_t segtack_r();
 	void segt_interrupt(int state);
+	void ns_w(int state);
 	uint8_t mmu_read(offs_t offset);
 	void mmu_write(offs_t offset, uint8_t data);
 
@@ -84,7 +89,18 @@ private:
 	required_device<cpu_device> m_fdcpu;
 	required_device<speaker_sound_device> m_spkrdev;
 	bool m_dma_on = false;
+	bool m_normal_mode = false;
 };
+
+void c900_state::machine_start()
+{
+	save_item(NAME(m_normal_mode));
+}
+
+void c900_state::machine_reset()
+{
+	m_normal_mode = false;
+}
 
 void c900_state::sound_pb_w(u8 data)
 {
@@ -128,7 +144,7 @@ bool c900_state::translate_addr(int spacenum, bool write, offs_t &offset)
 
 	mmu_offset &= 0x3f'ffff;	// Mask off seg bit 6 to disable URS checking in MMUs
 
-	if (!m_mmu->translate(mmu_offset, write, true, m_dma_on, st))
+	if (!m_mmu->translate(mmu_offset, write, !m_normal_mode, m_dma_on, st))
 		return false; // cycle suppressed by the MMU
 
 	offset = (mmu_offset | (offset & NON_MMU_MASK)) >> 1;
@@ -220,6 +236,11 @@ void c900_state::segt_interrupt(int state)
 	m_maincpu->set_input_line(z8001_device::SEGT_LINE, state ? ASSERT_LINE : CLEAR_LINE);
 }
 
+void c900_state::ns_w(int state)
+{
+	m_normal_mode = bool(state);
+}
+
 static INPUT_PORTS_START( c900 )
 INPUT_PORTS_END
 
@@ -250,6 +271,7 @@ void c900_state::c900(machine_config &config)
 	m_maincpu->set_addrmap(AS_IO, &c900_state::io_map);
 	m_maincpu->set_addrmap(z8001_device::AS_SIO, &c900_state::special_io_map);
 	m_maincpu->segtack().set(FUNC(c900_state::segtack_r));
+	m_maincpu->ns().set(FUNC(c900_state::ns_w));
 
 	ADDRESS_MAP_BANK(config, m_physmem).set_map(&c900_state::phys_mem_map).set_options(ENDIANNESS_BIG, 16, 24, 0x100'0000);
 
