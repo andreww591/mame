@@ -39,6 +39,7 @@ To Do:
 #include "machine/z8010.h"
 #include "bus/rs232/rs232.h"
 #include "machine/z8536.h"
+#include "c900_pdmac.h"
 #include "sound/spkrdev.h"
 #include "emupal.h"
 #include "speaker.h"
@@ -89,7 +90,7 @@ protected:
 
 private:
 	// sources of the shared vectored interrupt line, in daisy chain priority order
-	enum { VI_CIO, VI_SCC };
+	enum { VI_CIO, VI_SCC, VI_PDMAC };
 
 	void sound_pb_w(u8 data);
 
@@ -222,6 +223,7 @@ void c900_state::io_map(address_map &map)
 	map(0x0000, 0x007f).rw("cio", FUNC(z8036_device::read), FUNC(z8036_device::write)).umask16(0x00ff);
 	map(0x0080, 0x00ff).rw("cio2", FUNC(z8036_device::read), FUNC(z8036_device::write)).umask16(0x00ff);
 	map(0x0100, 0x013f).rw("scc", FUNC(scc8030_device::zbus_r), FUNC(scc8030_device::zbus_w)).umask16(0x00ff);
+	map(0x0500, 0x05ff).rw("pdmac", FUNC(c900_pdmac_device::read), FUNC(c900_pdmac_device::write));
 }
 
 void c900_state::special_io_map(address_map &map)
@@ -324,6 +326,7 @@ static const z80_daisy_config c900_daisy_chain[] =
 {
 	{ "cio" },
 	{ "scc" },
+	{ "pdmac" },
 	{ nullptr }
 };
 
@@ -370,6 +373,10 @@ void c900_state::c900(machine_config &config)
 	rs232_port_device &rs232(RS232_PORT(config, "rs232", default_rs232_devices, "terminal"));
 	rs232.rxd_handler().set("scc", FUNC(scc8030_device::rxb_w));
 	rs232.cts_handler().set("scc", FUNC(scc8030_device::ctsb_w));
+
+	c900_pdmac_device &pdmac(C900PDMAC(config, "pdmac", 12_MHz_XTAL / 8));
+	pdmac.ireq_callback().set(FUNC(c900_state::vi_w<VI_PDMAC>));
+	pdmac.set_dma_space(m_physmem, AS_PROGRAM);
 
 	SPEAKER(config, "mono").front_center();
 	SPEAKER_SOUND(config, m_spkrdev).add_route(ALL_OUTPUTS, "mono", 0.05);
