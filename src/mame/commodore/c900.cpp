@@ -125,9 +125,9 @@ bool c900_state::translate_addr(int spacenum, bool write, offs_t &offset)
 
 	mmu_offset &= 0x3f'ffff;	// Mask off seg bit 6 to disable URS checking in MMUs
 
-	if (!m_mmu->translate(mmu_offset, write, true, m_dma_on, st)){
-		mmu_offset = 0;
-	}
+	if (!m_mmu->translate(mmu_offset, write, true, m_dma_on, st))
+		return false; // cycle suppressed by the MMU
+
 	offset = (mmu_offset | (offset & NON_MMU_MASK)) >> 1;
 	return true;
 }
