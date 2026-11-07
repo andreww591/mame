@@ -410,7 +410,10 @@ bool z8010_device::translate(offs_t &offset, bool write, bool sys, bool dma, int
 				viol |= VTYPE_SWW;
 			else if (!sys)  // Fatal?
 			{
-				nsup = false;
+				// Only access violations activate Suppress, not write warnings: the
+				// store still happens.  (This can legitimately occur when an LDM pushes
+				// several words onto the boundary page within a single instruction,
+				// before the trap from the first one can be taken.)
 				viol |= VTYPE_FATL;
 			}
 		}
