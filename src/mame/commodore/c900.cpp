@@ -34,6 +34,7 @@ To Do:
 #include "cpu/z8000/z8000.h"
 #include "cpu/m6502/m6510.h"
 #include "machine/bankdev.h"
+#include "machine/z80daisy.h"
 #include "machine/z80scc.h"
 #include "machine/z8010.h"
 #include "bus/rs232/rs232.h"
@@ -42,6 +43,28 @@ To Do:
 #include "emupal.h"
 #include "speaker.h"
 #include "logmacro.h"
+
+class c900_daisy_device : public device_t, public z80_daisy_chain_interface
+{
+public:
+	c900_daisy_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
+	uint16_t viack_r() {
+		device_z80daisy_interface *intf = daisy_get_irq_device();
+		if (!intf) {
+			logerror("%s: VI acknowledge with no device requesting\n", machine().describe_context());
+			return 0xffff; // nobody drives the bus
+		}
+		return intf->z80daisy_irq_ack();
+	}
+protected:
+	void device_start() override {}
+};
+
+DEFINE_DEVICE_TYPE(C900_DAISY, c900_daisy_device, "c900_daisy", "Commodore 900 daisy chain device")
+
+c900_daisy_device::c900_daisy_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
+	: device_t(mconfig, C900_DAISY, tag, owner, clock)
+	, z80_daisy_chain_interface(mconfig, *this) {}
 
 namespace {
 
@@ -52,6 +75,7 @@ public:
 		: driver_device(mconfig, type, tag)
 		, m_maincpu(*this, "maincpu")
 		, m_mmu(*this, "mmu")
+		, m_daisy(*this, "c900_daisy")
 		, m_physmem(*this, "physmem")
 		, m_fdcpu(*this, "fdcpu")
 		, m_spkrdev(*this, "speaker")
@@ -64,6 +88,9 @@ protected:
 	virtual void machine_reset() override ATTR_COLD;
 
 private:
+	// sources of the shared vectored interrupt line, in daisy chain priority order
+	enum { VI_CIO, VI_SCC };
+
 	void sound_pb_w(u8 data);
 
 	void data_map(address_map &map) ATTR_COLD;
@@ -78,23 +105,28 @@ private:
 	void virt_w(address_space &space, offs_t offset, uint16_t data, uint16_t mask);
 	uint16_t segtack_r();
 	void segt_interrupt(int state);
+	template <unsigned N> void vi_w(int state);
 	void ns_w(int state);
+	uint16_t nviack_r();
 	uint8_t mmu_read(offs_t offset);
 	void mmu_write(offs_t offset, uint8_t data);
 
 
 	required_device<z8001_device> m_maincpu;
 	required_device<z8010_device> m_mmu;
+	required_device<c900_daisy_device> m_daisy;
 	required_device<address_map_bank_device> m_physmem;
 	required_device<cpu_device> m_fdcpu;
 	required_device<speaker_sound_device> m_spkrdev;
 	bool m_dma_on = false;
 	bool m_normal_mode = false;
+	uint8_t m_vi_lines = 0;
 };
 
 void c900_state::machine_start()
 {
 	save_item(NAME(m_normal_mode));
+	save_item(NAME(m_vi_lines));
 }
 
 void c900_state::machine_reset()
@@ -242,9 +274,29 @@ void c900_state::segt_interrupt(int state)
 	m_maincpu->set_input_line(z8001_device::SEGT_LINE, state ? ASSERT_LINE : CLEAR_LINE);
 }
 
+// The daisy chain picks which device answers the acknowledge. The line itself is the OR of
+// the requests; IEI/IEO gating of lower priority requests while a device is under service
+// isn't modelled, since the SCC doesn't report when its IUS clears.
+template <unsigned N>
+void c900_state::vi_w(int state)
+{
+	if (state)
+		m_vi_lines |= 1U << N;
+	else
+		m_vi_lines &= ~(1U << N);
+
+	m_maincpu->set_input_line(z8001_device::VI_LINE, m_vi_lines ? ASSERT_LINE : CLEAR_LINE);
+}
+
 void c900_state::ns_w(int state)
 {
 	m_normal_mode = bool(state);
+}
+
+uint16_t c900_state::nviack_r()
+{
+	//TODO
+	return (0);
 }
 
 static INPUT_PORTS_START( c900 )
@@ -268,6 +320,13 @@ static GFXDECODE_START( gfx_c900 )
 	GFXDECODE_ENTRY( "chargen", 0x0000, charlayout, 0, 1 )
 GFXDECODE_END
 
+static const z80_daisy_config c900_daisy_chain[] =
+{
+	{ "cio" },
+	{ "scc" },
+	{ nullptr }
+};
+
 void c900_state::c900(machine_config &config)
 {
 	/* basic machine hardware */
@@ -277,7 +336,12 @@ void c900_state::c900(machine_config &config)
 	m_maincpu->set_addrmap(AS_IO, &c900_state::io_map);
 	m_maincpu->set_addrmap(z8001_device::AS_SIO, &c900_state::special_io_map);
 	m_maincpu->segtack().set(FUNC(c900_state::segtack_r));
+	m_maincpu->viack().set(m_daisy, FUNC(c900_daisy_device::viack_r));
 	m_maincpu->ns().set(FUNC(c900_state::ns_w));
+	m_maincpu->nviack().set(FUNC(c900_state::nviack_r));
+
+	C900_DAISY(config, m_daisy);
+	m_daisy->set_daisy_config(c900_daisy_chain);
 
 	ADDRESS_MAP_BANK(config, m_physmem).set_map(&c900_state::phys_mem_map).set_options(ENDIANNESS_BIG, 16, 24, 0x100'0000);
 
@@ -292,6 +356,7 @@ void c900_state::c900(machine_config &config)
 
 	z8036_device &cio(Z8036(config, "cio", 12_MHz_XTAL / 2)); // PCLK; Coherent derives its 100 Hz tick from this
 	cio.pb_wr_cb().set(FUNC(c900_state::sound_pb_w));
+	cio.irq_wr_cb().set(FUNC(c900_state::vi_w<VI_CIO>));
 
 	Z8036(config, "cio2", 12_MHz_XTAL / 2); // U66, tested by the boot ROM as "CIO2"; IEEE-488 interface?
 
@@ -300,7 +365,7 @@ void c900_state::c900(machine_config &config)
 	scc.out_txdb_callback().set("rs232", FUNC(rs232_port_device::write_txd));
 	scc.out_dtrb_callback().set("rs232", FUNC(rs232_port_device::write_dtr));
 	scc.out_rtsb_callback().set("rs232", FUNC(rs232_port_device::write_rts));
-	//scc.out_int_callback().set("rs232", FUNC(c900_state::scc_int));
+	scc.out_int_callback().set(FUNC(c900_state::vi_w<VI_SCC>));
 
 	rs232_port_device &rs232(RS232_PORT(config, "rs232", default_rs232_devices, "terminal"));
 	rs232.rxd_handler().set("scc", FUNC(scc8030_device::rxb_w));
