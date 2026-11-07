@@ -214,6 +214,34 @@ u8 cio_base_device::acknowledge_interrupt()
 
 
 //-------------------------------------------------
+//  daisy_state - overall state as seen by the
+//  interrupt daisy chain
+//-------------------------------------------------
+
+int cio_base_device::daisy_state() const
+{
+	if (m_register[MASTER_INTERRUPT_CONTROL] & MICR_MIE)
+	{
+		for (int i = 0; i < 5; i++)
+		{
+			if (m_register[PRIORITY[i]] & PCS_IUS)
+			{
+				// we are currently servicing an interrupt request
+				return Z80_DAISY_IEO;
+			}
+			else if ((m_register[PRIORITY[i]] & PCS_IE) && (m_register[PRIORITY[i]] & PCS_IP))
+			{
+				// indicate that we have an interrupt request waiting
+				return Z80_DAISY_INT;
+			}
+		}
+	}
+
+	return 0;
+}
+
+
+//-------------------------------------------------
 //  check_interrupt - check interrupt status
 //-------------------------------------------------
 
@@ -988,7 +1016,8 @@ cio_base_device::cio_base_device(const machine_config &mconfig, device_type type
 //-------------------------------------------------
 
 z8036_device::z8036_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock) :
-	cio_base_device(mconfig, Z8036, tag, owner, clock)
+	cio_base_device(mconfig, Z8036, tag, owner, clock),
+	device_z80daisy_interface(mconfig, *this)
 {
 }
 
@@ -1118,24 +1147,7 @@ TIMER_CALLBACK_MEMBER(cio_base_device::advance_counters)
 
 int z8536_device::z80daisy_irq_state()
 {
-	if (m_register[MASTER_INTERRUPT_CONTROL] & MICR_MIE)
-	{
-		for (int i = 0; i < 5; i++)
-		{
-			if (m_register[PRIORITY[i]] & PCS_IUS)
-			{
-				// we are currently servicing an interrupt request
-				return Z80_DAISY_IEO;
-			}
-			else if ((m_register[PRIORITY[i]] & PCS_IE) && (m_register[PRIORITY[i]] & PCS_IP))
-			{
-				// indicate that we have an interrupt request waiting
-				return Z80_DAISY_INT;
-			}
-		}
-	}
-
-	return 0;
+	return daisy_state();
 }
 
 
@@ -1159,6 +1171,37 @@ void z8536_device::z80daisy_irq_reti()
 {
 }
 
+
+//-------------------------------------------------
+//  z80daisy_irq_state - return the overall IRQ
+//  state for this device
+//-------------------------------------------------
+
+int z8036_device::z80daisy_irq_state()
+{
+	return daisy_state();
+}
+
+
+//-------------------------------------------------
+//  z80daisy_irq_ack - acknowledge an IRQ and
+//  return the appropriate vector
+//-------------------------------------------------
+
+int z8036_device::z80daisy_irq_ack()
+{
+	return intack_r();
+}
+
+
+//-------------------------------------------------
+//  z80daisy_irq_reti - clear the interrupt
+//  pending state to allow other interrupts through
+//-------------------------------------------------
+
+void z8036_device::z80daisy_irq_reti()
+{
+}
 
 //-------------------------------------------------
 //  intack_r - interrupt acknowledge
