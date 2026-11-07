@@ -119,7 +119,8 @@ void c900_state::phys_mem_map(address_map &map)
 	map(0x080000, 0x17ffff).ram(); // 1 MB motherboard DRAM
 }
 
-#define NON_MMU_MASK 0x1ff
+// A7-A0 bypass the MMU, which only sees and adds to the upper byte of the offset
+#define NON_MMU_MASK 0xff
 
 bool c900_state::translate_addr(int spacenum, bool write, offs_t &offset)
 {
