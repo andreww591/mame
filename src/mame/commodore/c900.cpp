@@ -259,10 +259,10 @@ void c900_state::c900(machine_config &config)
 	GFXDECODE(config, "gfxdecode", "palette", gfx_c900);
 	PALETTE(config, "palette", palette_device::MONOCHROME);
 
-	z8036_device &cio(Z8036(config, "cio", 12_MHz_XTAL / 16)); // SNDCLK = 750kHz
+	z8036_device &cio(Z8036(config, "cio", 12_MHz_XTAL / 2)); // PCLK; Coherent derives its 100 Hz tick from this
 	cio.pb_wr_cb().set(FUNC(c900_state::sound_pb_w));
 
-	Z8036(config, "cio2", 12_MHz_XTAL / 16); // U66, tested by the boot ROM as "CIO2"; IEEE-488 interface?
+	Z8036(config, "cio2", 12_MHz_XTAL / 2); // U66, tested by the boot ROM as "CIO2"; IEEE-488 interface?
 
 	scc8030_device &scc(SCC8030(config, "scc", 12_MHz_XTAL / 2)); // 5'850'000 is the ideal figure
 	/* Port B */
