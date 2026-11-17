@@ -47,8 +47,14 @@ inline void z8010_device::INC_SAR()
 
 inline void z8010_device::INC_DSC(const uint8_t max_dsc = DSC_SDR_ATTR)
 {
+	// The DSC cycles through the bytes of the field being accessed without touching the
+	// SAR, so e.g. reading base high/low and then writing base high/low through command
+	// 08 addresses the same two bytes twice (OpenCoherent's interrupt entry relies on this
+	// to remap its driver overlay segment).
 	if (m_dsc < max_dsc)
 		++m_dsc;
+	else
+		m_dsc = DSC_SDR_BAH;
 }
 
 //-------------------------------------------------
