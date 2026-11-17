@@ -337,6 +337,12 @@ u8 cio_base_device::read_register(offs_t offset)
 		data = 0xf0 | (m_read_pc() & 0x0f);
 		break;
 
+	case PORT_A_COMMAND_AND_STATUS:
+	case PORT_B_COMMAND_AND_STATUS:
+		// PMF reflects the current state of the pattern match logic
+		data = (m_register[offset] & ~PCS_PMF) | (m_match[offset - PORT_A_COMMAND_AND_STATUS] ? PCS_PMF : 0);
+		break;
+
 	case COUNTER_TIMER_1_CURRENT_COUNT_MS_BYTE:
 	case COUNTER_TIMER_2_CURRENT_COUNT_MS_BYTE:
 	case COUNTER_TIMER_3_CURRENT_COUNT_MS_BYTE:
@@ -939,6 +945,25 @@ void cio_base_device::match_pattern(int port)
 	case PMS_DISABLE:
 		m_match[port] = 0;
 		return;
+
+	case PMS_AND:
+	case PMS_OR:
+		{
+		// A bit port specified in AND or OR mode raises IP when the match condition
+		// becomes true; it does not keep requesting while the condition persists
+		// (the Commodore 900 keyboard handshake clears IP before dropping PA7).
+		bool const matched = ((pms & PMS_PMS_MASK) >> 1) == PMS_AND ? (pm && (match == pm)) : (match != 0);
+		bool const was_matched = m_match[port] != 0;
+		m_match[port] = matched ? match : 0;
+
+		if (matched && !was_matched)
+		{
+			LOG("%s CIO Port %c Interrupt Pending\n", machine().describe_context(), 'A' + port);
+			m_register[PORT_A_COMMAND_AND_STATUS + port] |= PCS_IP;
+			check_interrupt();
+		}
+		}
+		break;
 
 	case PMS_OR_PEV:
 		m_match[port] = match;
