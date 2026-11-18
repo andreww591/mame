@@ -120,7 +120,8 @@ void c900_pdmac_device::process_command(uint32_t cb, bool is_floppy)
 	uint8_t const mid = space.read_byte(cb + 0x02);
 	uint8_t const low = space.read_byte(cb + 0x03);
 	uint8_t const bcnt = space.read_byte(cb + 0x04);
-	uint32_t const dma = (uint32_t(space.read_byte(cb + 0x06)) << 16) | (uint32_t(space.read_byte(cb + 0x07)) << 8) | space.read_byte(cb + 0x08);
+	uint32_t const dma = (uint32_t(space.read_byte(cb + 0x06)) << 16) |
+		(uint32_t(space.read_byte(cb + 0x07)) << 8) | space.read_byte(cb + 0x08);
 	uint32_t const lba = (uint32_t(lunhi & 0x1f) << 16) | (uint32_t(mid) << 8) | low;
 
 	bool const ready = !is_floppy && m_drive->exists();
