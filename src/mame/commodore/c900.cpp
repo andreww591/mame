@@ -121,6 +121,7 @@ private:
 	required_device<speaker_sound_device> m_spkrdev;
 	bool m_dma_on = false;
 	bool m_normal_mode = false;
+	uint8_t m_mmu_mode = 0;  // shadow of the MMU mode register
 	uint8_t m_vi_lines = 0;
 };
 
@@ -128,6 +129,7 @@ void c900_state::machine_start()
 {
 	save_item(NAME(m_normal_mode));
 	save_item(NAME(m_vi_lines));
+	save_item(NAME(m_mmu_mode));
 }
 
 void c900_state::machine_reset()
@@ -135,6 +137,7 @@ void c900_state::machine_reset()
 	// _CS is low during reset on this board, which makes the MMU come up with its master
 	// enable set and translation off, i.e. passing addresses straight through
 	m_mmu->write(0x00, 0x80);
+	m_mmu_mode = 0x80;
 	m_normal_mode = false;
 }
 
@@ -182,6 +185,15 @@ bool c900_state::translate_addr(int spacenum, bool write, offs_t &offset)
 		m_mmu->ifetch1_observed(offset);
 
 	mmu_offset &= 0x3f'ffff;	// Mask off seg bit 6 to disable URS checking in MMUs
+
+	// With master enable off the MMU tri-states its address outputs; assume the board
+	// then passes the CPU's segment/offset through to memory unchanged.  Unverified
+	// against schematics, but OpenCoherent's restart() relies on it to drop back into
+	// the boot ROM, and the reference emulator behaves the same way.
+	if (!BIT(m_mmu_mode, 7)){
+		offset >>= 1;
+		return true;
+	}
 
 	if (!m_mmu->translate(mmu_offset, write, !m_normal_mode, m_dma_on, st))
 		return false; // cycle suppressed by the MMU
@@ -250,6 +262,8 @@ uint8_t c900_state::mmu_read(offs_t offset)
 void c900_state::mmu_write(offs_t offset, uint8_t data)
 {
 	if (mmu_valid(offset)) {
+		if ((offset >> 8) == 0x00)
+			m_mmu_mode = data;
 		m_mmu->write(offset >> 8, data);
 	}else{
 		return ;
