@@ -17387,6 +17387,7 @@ c128p
 
 @source:commodore/c900.cpp
 c900
+c900nv
 
 @source:commodore/cbm2.cpp
 b128

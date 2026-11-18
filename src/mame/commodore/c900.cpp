@@ -40,6 +40,8 @@ To Do:
 #include "bus/rs232/rs232.h"
 #include "machine/z8536.h"
 #include "c900_pdmac.h"
+#include "c900_kbd.h"
+#include "screen.h"
 #include "sound/spkrdev.h"
 #include "emupal.h"
 #include "speaker.h"
@@ -80,9 +82,16 @@ public:
 		, m_physmem(*this, "physmem")
 		, m_fdcpu(*this, "fdcpu")
 		, m_spkrdev(*this, "speaker")
+		, m_cio(*this, "cio")
+		, m_kbd(*this, "kbd")
+		, m_vram(*this, "vram")
+		, m_mousex(*this, "MOUSEX")
+		, m_mousey(*this, "MOUSEY")
 	{ }
 
-	void c900(machine_config &config);
+	void c900(machine_config &config, unsigned vram_start, unsigned vram_end, const char *serial_device);
+	void c900nv(machine_config &config);
+	void c900hr(machine_config &config);
 
 protected:
 	virtual void machine_start() override ATTR_COLD;
@@ -93,6 +102,7 @@ private:
 	enum { VI_CIO, VI_SCC, VI_PDMAC };
 
 	void sound_pb_w(u8 data);
+	void kbd_pc_w(u8 data);
 
 	void data_map(address_map &map) ATTR_COLD;
 	void io_map(address_map &map) ATTR_COLD;
@@ -111,6 +121,7 @@ private:
 	uint16_t nviack_r();
 	uint8_t mmu_read(offs_t offset);
 	void mmu_write(offs_t offset, uint8_t data);
+	u32 screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
 
 
 	required_device<z8001_device> m_maincpu;
@@ -119,10 +130,16 @@ private:
 	required_device<address_map_bank_device> m_physmem;
 	required_device<cpu_device> m_fdcpu;
 	required_device<speaker_sound_device> m_spkrdev;
+	required_device<z8036_device> m_cio;
+	required_device<c900_kbd_device> m_kbd;
+	required_shared_ptr<u16> m_vram;
+	required_ioport m_mousex, m_mousey;
 	bool m_dma_on = false;
 	bool m_normal_mode = false;
 	uint8_t m_mmu_mode = 0;  // shadow of the MMU mode register
 	uint8_t m_vi_lines = 0;
+	uint32_t m_vram_start;
+	uint32_t m_vram_end;
 };
 
 void c900_state::machine_start()
@@ -146,6 +163,11 @@ void c900_state::sound_pb_w(u8 data)
 	m_spkrdev->level_w(BIT(data, 0));
 }
 
+void c900_state::kbd_pc_w(u8 data)
+{
+	m_kbd->kbdclr_w(BIT(data, 3)); // PC3 = KBDCLR
+}
+
 void c900_state::phys_mem_map(address_map &map)
 {
 	// Nothing else responds: the expansion bus and the video boards float, and the boot
@@ -153,6 +175,7 @@ void c900_state::phys_mem_map(address_map &map)
 	map.unmap_value_high();
 	map(0x000000, 0x007fff).rom().region("roms", 0);
 	map(0x080000, 0x17ffff).ram(); // 1 MB motherboard DRAM
+	map(m_vram_start, m_vram_end).ram().share("vram");
 }
 
 // A7-A0 bypass the MMU, which only sees and adds to the upper byte of the offset
@@ -236,6 +259,11 @@ void c900_state::io_map(address_map &map)
 	map(0x0080, 0x00ff).rw("cio2", FUNC(z8036_device::read), FUNC(z8036_device::write)).umask16(0x00ff);
 	map(0x0100, 0x013f).rw("scc", FUNC(scc8030_device::zbus_r), FUNC(scc8030_device::zbus_w)).umask16(0x00ff);
 	map(0x0500, 0x05ff).rw("pdmac", FUNC(c900_pdmac_device::read), FUNC(c900_pdmac_device::write));
+	map(0x0204, 0x0205).rw(m_kbd, FUNC(c900_kbd_device::read_latch), FUNC(c900_kbd_device::write_latch)).umask16(0x00ff);
+	// mouse: 10-bit free-running position counters, buttons in the top bits of the X port
+	map(0x0400, 0x0401).lr16(NAME([this] () { return m_mousex->read(); }));
+	map(0x0402, 0x0403).lr16(NAME([this] () { return m_mousey->read(); }));
+	map(0x0404, 0x041f).nopw(); // video board control (0x0404 / 0x0414 bitmap enable, 0x0410-0x0418 text CRTC); TODO
 }
 
 void c900_state::special_io_map(address_map &map)
@@ -316,7 +344,46 @@ uint16_t c900_state::nviack_r()
 }
 
 static INPUT_PORTS_START( c900 )
+	PORT_START("MOUSEX")
+	PORT_BIT(0x03ff, 0, IPT_MOUSE_X) PORT_SENSITIVITY(100) PORT_KEYDELTA(0)
+	// Button names are from the OpenCoherent hr driver (DACTION/DWMENU/DSMENU); its GUI
+	// treats 0x8000 as the left button, 0x4000 as the middle and 0x2000 as the right.
+	PORT_BIT(0x1c00, IP_ACTIVE_HIGH, IPT_UNUSED)
+	PORT_BIT(0x2000, IP_ACTIVE_HIGH, IPT_BUTTON2) PORT_NAME("Right Button (Action)")
+	PORT_BIT(0x4000, IP_ACTIVE_HIGH, IPT_BUTTON3) PORT_NAME("Middle Button (Window Menu)")
+	PORT_BIT(0x8000, IP_ACTIVE_HIGH, IPT_BUTTON1) PORT_NAME("Left Button (Screen Menu)")
+	PORT_START("MOUSEY")
+	PORT_BIT(0x03ff, 0, IPT_MOUSE_Y) PORT_SENSITIVITY(100) PORT_KEYDELTA(0)
+	PORT_BIT(0xfc00, IP_ACTIVE_HIGH, IPT_UNUSED)
 INPUT_PORTS_END
+
+/*************************************
+ *
+ *  Video refresh
+ *
+ *************************************/
+
+#define X_RES 1024
+#define Y_RES 800
+
+u32 c900_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect)
+{
+	for (int y = 0; y < Y_RES; y++){
+		u16 *const line = &bitmap.pix(y);
+		u16 const *video_ram = &m_vram[y * X_RES / 16]; // 128 bytes per scan line
+
+		for (int x = 0; x < X_RES; x += 16){
+			u16 const word = *(video_ram++);
+			for (int b = 0; b < 16; b++){
+				line[x + b] = BIT(word, 15 - b);
+			}
+		}
+	}
+
+	return 0;
+}
+
+
 
 /* F4 Character Displayer */
 static const gfx_layout charlayout =
@@ -344,7 +411,7 @@ static const z80_daisy_config c900_daisy_chain[] =
 	{ nullptr }
 };
 
-void c900_state::c900(machine_config &config)
+void c900_state::c900(machine_config &config, unsigned vram_start, unsigned vram_end, const char *serial_device)
 {
 	/* basic machine hardware */
 	Z8001(config, m_maincpu, 12_MHz_XTAL / 2);
@@ -360,6 +427,8 @@ void c900_state::c900(machine_config &config)
 	C900_DAISY(config, m_daisy);
 	m_daisy->set_daisy_config(c900_daisy_chain);
 
+	m_vram_start = vram_start;
+	m_vram_end = vram_end;
 	ADDRESS_MAP_BANK(config, m_physmem).set_map(&c900_state::phys_mem_map).set_options(ENDIANNESS_BIG, 16, 24, 0x100'0000);
 
 	Z8010(config, m_mmu, 12_MHz_XTAL / 2);
@@ -371,9 +440,12 @@ void c900_state::c900(machine_config &config)
 	GFXDECODE(config, "gfxdecode", "palette", gfx_c900);
 	PALETTE(config, "palette", palette_device::MONOCHROME);
 
-	z8036_device &cio(Z8036(config, "cio", 12_MHz_XTAL / 2)); // PCLK; Coherent derives its 100 Hz tick from this
-	cio.pb_wr_cb().set(FUNC(c900_state::sound_pb_w));
-	cio.irq_wr_cb().set(FUNC(c900_state::vi_w<VI_CIO>));
+	Z8036(config, m_cio, 12_MHz_XTAL / 2); // PCLK; Coherent derives its 100 Hz tick from this
+	m_cio->pb_wr_cb().set(FUNC(c900_state::sound_pb_w));
+	m_cio->irq_wr_cb().set(FUNC(c900_state::vi_w<VI_CIO>));
+	m_cio->pc_wr_cb().set(FUNC(c900_state::kbd_pc_w));
+	m_cio->pa_rd_cb().set(m_kbd, FUNC(c900_kbd_device::pa_r));
+	m_cio->pc_rd_cb().set(m_kbd, FUNC(c900_kbd_device::pc_r));
 
 	Z8036(config, "cio2", 12_MHz_XTAL / 2); // U66, tested by the boot ROM as "CIO2"; IEEE-488 interface?
 
@@ -384,7 +456,7 @@ void c900_state::c900(machine_config &config)
 	scc.out_rtsb_callback().set("rs232", FUNC(rs232_port_device::write_rts));
 	scc.out_int_callback().set(FUNC(c900_state::vi_w<VI_SCC>));
 
-	rs232_port_device &rs232(RS232_PORT(config, "rs232", default_rs232_devices, "terminal"));
+	rs232_port_device &rs232(RS232_PORT(config, "rs232", default_rs232_devices, serial_device));
 	rs232.rxd_handler().set("scc", FUNC(scc8030_device::rxb_w));
 	rs232.cts_handler().set("scc", FUNC(scc8030_device::ctsb_w));
 
@@ -392,8 +464,27 @@ void c900_state::c900(machine_config &config)
 	pdmac.ireq_callback().set(FUNC(c900_state::vi_w<VI_PDMAC>));
 	pdmac.set_dma_space(m_physmem, AS_PROGRAM);
 
+	C900KBD(config, m_kbd, 12_MHz_XTAL / 8);
+	m_kbd->strobe_callback().set(m_cio, FUNC(z8036_device::pa7_w));
+
 	SPEAKER(config, "mono").front_center();
 	SPEAKER_SOUND(config, m_spkrdev).add_route(ALL_OUTPUTS, "mono", 0.05);
+}
+
+void c900_state::c900hr(machine_config &config)
+{
+	c900(config, 0x3e0000, 0x3fffff, nullptr);
+	/* video hardware */
+	screen_device &screen(SCREEN(config, "screen"));
+	screen.set_raw(70'000'000, 1344, 0, 1024, 838, 0, 800);
+	screen.set_screen_update(FUNC(c900_state::screen_update));
+	screen.set_palette("palette");
+	PALETTE(config, "palette", palette_device::MONOCHROME);
+}
+
+void c900_state::c900nv(machine_config &config)
+{
+	c900(config, 0x7f0000, 0x7fffff, "terminal");
 }
 
 ROM_START( c900 )
@@ -410,6 +501,9 @@ ROM_END
 
 } // anonymous namespace
 
+#define rom_c900nv rom_c900
+#define rom_c900hr rom_c900
 
 /*    YEAR  NAME  PARENT  COMPAT  MACHINE  INPUT  CLASS       INIT        COMPANY      FULLNAME         FLAGS */
-COMP( 1985, c900, 0,      0,      c900,    c900,  c900_state, empty_init, "Commodore", "Commodore 900", MACHINE_NO_SOUND | MACHINE_NOT_WORKING | MACHINE_SUPPORTS_SAVE )
+COMP( 1985, c900, 0,      0,      c900hr,    c900,  c900_state, empty_init, "Commodore", "Commodore 900 (high-res workstation)", MACHINE_NO_SOUND | MACHINE_NOT_WORKING | MACHINE_SUPPORTS_SAVE )
+COMP( 1985, c900nv, c900,      0,      c900nv,    c900,  c900_state, empty_init, "Commodore", "Commodore 900 (server without video)", MACHINE_NO_SOUND | MACHINE_NOT_WORKING | MACHINE_SUPPORTS_SAVE )
