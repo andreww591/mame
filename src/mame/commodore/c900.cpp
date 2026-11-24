@@ -385,6 +385,7 @@ u32 c900_state::screen_update(screen_device &screen, bitmap_ind16 &bitmap, const
 
 
 
+#if 0
 /* F4 Character Displayer */
 static const gfx_layout charlayout =
 {
@@ -402,6 +403,7 @@ static const gfx_layout charlayout =
 static GFXDECODE_START( gfx_c900 )
 	GFXDECODE_ENTRY( "chargen", 0x0000, charlayout, 0, 1 )
 GFXDECODE_END
+#endif
 
 static const z80_daisy_config c900_daisy_chain[] =
 {
@@ -437,8 +439,8 @@ void c900_state::c900(machine_config &config, unsigned vram_start, unsigned vram
 	M6508(config, m_fdcpu, 12_MHz_XTAL / 8); // PH1/PH2 = 1.5 MHz
 	m_fdcpu->set_addrmap(AS_PROGRAM, &c900_state::fdc_map);
 
-	GFXDECODE(config, "gfxdecode", "palette", gfx_c900);
-	PALETTE(config, "palette", palette_device::MONOCHROME);
+	/*GFXDECODE(config, "gfxdecode", "palette", gfx_c900);
+	PALETTE(config, "palette", palette_device::MONOCHROME);*/
 
 	Z8036(config, m_cio, 12_MHz_XTAL / 2); // PCLK; Coherent derives its 100 Hz tick from this
 	m_cio->pb_wr_cb().set(FUNC(c900_state::sound_pb_w));
