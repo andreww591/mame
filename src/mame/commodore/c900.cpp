@@ -82,7 +82,8 @@ public:
 		, m_physmem(*this, "physmem")
 		, m_fdcpu(*this, "fdcpu")
 		, m_spkrdev(*this, "speaker")
-		, m_cio(*this, "cio")
+		, m_cio1(*this, "cio1")
+		, m_cio2(*this, "cio2")
 		, m_kbd(*this, "kbd")
 		, m_vram(*this, "vram")
 		, m_mousex(*this, "MOUSEX")
@@ -130,7 +131,8 @@ private:
 	required_device<address_map_bank_device> m_physmem;
 	required_device<cpu_device> m_fdcpu;
 	required_device<speaker_sound_device> m_spkrdev;
-	required_device<z8036_device> m_cio;
+	required_device<z8036_device> m_cio1;
+	required_device<z8036_device> m_cio2;
 	required_device<c900_kbd_device> m_kbd;
 	required_shared_ptr<u16> m_vram;
 	required_ioport m_mousex, m_mousey;
@@ -255,7 +257,7 @@ void c900_state::virt_data_map(address_map &map)
 
 void c900_state::io_map(address_map &map)
 {
-	map(0x0000, 0x007f).rw("cio", FUNC(z8036_device::read), FUNC(z8036_device::write)).umask16(0x00ff);
+	map(0x0000, 0x007f).rw("cio1", FUNC(z8036_device::read), FUNC(z8036_device::write)).umask16(0x00ff);
 	map(0x0080, 0x00ff).rw("cio2", FUNC(z8036_device::read), FUNC(z8036_device::write)).umask16(0x00ff);
 	map(0x0100, 0x013f).rw("scc", FUNC(scc8030_device::zbus_r), FUNC(scc8030_device::zbus_w)).umask16(0x00ff);
 	map(0x0500, 0x05ff).rw("pdmac", FUNC(c900_pdmac_device::read), FUNC(c900_pdmac_device::write));
@@ -407,8 +409,9 @@ GFXDECODE_END
 
 static const z80_daisy_config c900_daisy_chain[] =
 {
-	{ "cio" },
+	{ "cio1" },
 	{ "scc" },
+	{ "cio2" },
 	{ "pdmac" },
 	{ nullptr }
 };
@@ -442,14 +445,14 @@ void c900_state::c900(machine_config &config, unsigned vram_start, unsigned vram
 	/*GFXDECODE(config, "gfxdecode", "palette", gfx_c900);
 	PALETTE(config, "palette", palette_device::MONOCHROME);*/
 
-	Z8036(config, m_cio, 12_MHz_XTAL / 2); // PCLK; Coherent derives its 100 Hz tick from this
-	m_cio->pb_wr_cb().set(FUNC(c900_state::sound_pb_w));
-	m_cio->irq_wr_cb().set(FUNC(c900_state::vi_w<VI_CIO>));
-	m_cio->pc_wr_cb().set(FUNC(c900_state::kbd_pc_w));
-	m_cio->pa_rd_cb().set(m_kbd, FUNC(c900_kbd_device::pa_r));
-	m_cio->pc_rd_cb().set(m_kbd, FUNC(c900_kbd_device::pc_r));
+	Z8036(config, m_cio1, 12_MHz_XTAL / 2); // PCLK; Coherent derives its 100 Hz tick from this
+	m_cio1->irq_wr_cb().set(FUNC(c900_state::vi_w<VI_CIO>));
+	m_cio1->pc_wr_cb().set(FUNC(c900_state::kbd_pc_w));
+	m_cio1->pa_rd_cb().set(m_kbd, FUNC(c900_kbd_device::pa_r));
+	m_cio1->pc_rd_cb().set(m_kbd, FUNC(c900_kbd_device::pc_r));
 
-	Z8036(config, "cio2", 12_MHz_XTAL / 2); // U66, tested by the boot ROM as "CIO2"; IEEE-488 interface?
+	Z8036(config, m_cio2, 12_MHz_XTAL / 2); // U66, tested by the boot ROM as "CIO2"; IEEE-488 interface?
+	m_cio2->pb_wr_cb().set(FUNC(c900_state::sound_pb_w));
 
 	scc8030_device &scc(SCC8030(config, "scc", 12_MHz_XTAL / 2)); // 5'850'000 is the ideal figure
 	/* Port B */
@@ -467,7 +470,7 @@ void c900_state::c900(machine_config &config, unsigned vram_start, unsigned vram
 	pdmac.set_dma_space(m_physmem, AS_PROGRAM);
 
 	C900KBD(config, m_kbd, 12_MHz_XTAL / 8);
-	m_kbd->strobe_callback().set(m_cio, FUNC(z8036_device::pa7_w));
+	m_kbd->strobe_callback().set(m_cio1, FUNC(z8036_device::pa7_w));
 
 	SPEAKER(config, "mono").front_center();
 	SPEAKER_SOUND(config, m_spkrdev).add_route(ALL_OUTPUTS, "mono", 0.05);
