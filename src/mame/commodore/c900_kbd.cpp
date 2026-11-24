@@ -246,16 +246,34 @@ void c900_kbd_device::key_event(uint8_t code)
 	update_strobe();
 }
 
-void c900_kbd_device::key_make(uint8_t row, uint8_t column)
+void c900_kbd_device::key_make_inner(uint8_t row, uint8_t column)
 {
 	key_event(translate(row, column));
 }
 
-void c900_kbd_device::key_break(uint8_t row, uint8_t column)
+void c900_kbd_device::key_break_inner(uint8_t row, uint8_t column)
 {
 	uint8_t const code = translate(row, column);
-	if (code != 0xff)
-		key_event(code | 0x80);
+	key_event(code | 0x80);
+}
+
+
+void c900_kbd_device::key_make(uint8_t row, uint8_t column)
+{
+	key_make_inner(row, column);
+	typematic_start(row, column, attotime::from_msec(750), attotime::from_msec(50));
+}
+
+void c900_kbd_device::key_break(uint8_t row, uint8_t column)
+{
+	key_break_inner(row, column);
+	typematic_stop();
+}
+
+void c900_kbd_device::key_repeat(uint8_t row, uint8_t column)
+{
+	key_break_inner(row, column);
+	key_make_inner(row, column);
 }
 
 // The latch is loaded whenever it is empty and KBDCLR isn't holding it clear

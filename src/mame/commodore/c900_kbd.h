@@ -32,12 +32,15 @@ protected:
 
 	virtual void key_make(uint8_t row, uint8_t column) override;
 	virtual void key_break(uint8_t row, uint8_t column) override;
+	virtual void key_repeat(uint8_t row, uint8_t column) override;
 
 private:
 	static constexpr unsigned FIFO_SIZE = 16;
 
 	uint8_t translate(uint8_t row, uint8_t column) const;
 	void key_event(uint8_t code);
+	void key_make_inner(uint8_t row, uint8_t column);
+	void key_break_inner(uint8_t row, uint8_t column);
 	void update_strobe();
 
 	devcb_write_line m_strobe_cb;
