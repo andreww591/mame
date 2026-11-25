@@ -38,6 +38,7 @@ To Do:
 #include "machine/z80scc.h"
 #include "machine/z8010.h"
 #include "bus/rs232/rs232.h"
+#include "bus/centronics/ctronics.h"
 #include "machine/z8536.h"
 #include "c900_pdmac.h"
 #include "c900_kbd.h"
@@ -84,6 +85,8 @@ public:
 		, m_spkrdev(*this, "speaker")
 		, m_cio1(*this, "cio1")
 		, m_cio2(*this, "cio2")
+		, m_centronics(*this, "centronics")
+		, m_cent_data(*this, "cent_data")
 		, m_kbd(*this, "kbd")
 		, m_vram(*this, "vram")
 		, m_mousex(*this, "MOUSEX")
@@ -100,7 +103,7 @@ protected:
 
 private:
 	// sources of the shared vectored interrupt line, in daisy chain priority order
-	enum { VI_CIO, VI_SCC, VI_PDMAC };
+	enum { VI_CIO1, VI_SCC, VI_CIO2, VI_PDMAC };
 
 	void sound_pb_w(u8 data);
 	void kbd_pc_w(u8 data);
@@ -120,6 +123,8 @@ private:
 	template <unsigned N> void vi_w(int state);
 	void ns_w(int state);
 	uint16_t nviack_r();
+	uint8_t cio1_pc_r();
+	uint8_t cio2_pb_r();
 	uint8_t mmu_read(offs_t offset);
 	void mmu_write(offs_t offset, uint8_t data);
 	u32 screen_update(screen_device &screen, bitmap_ind16 &bitmap, const rectangle &cliprect);
@@ -133,11 +138,15 @@ private:
 	required_device<speaker_sound_device> m_spkrdev;
 	required_device<z8036_device> m_cio1;
 	required_device<z8036_device> m_cio2;
+	required_device<centronics_device> m_centronics;
+	required_device<output_latch_device> m_cent_data;
 	required_device<c900_kbd_device> m_kbd;
 	required_shared_ptr<u16> m_vram;
 	required_ioport m_mousex, m_mousey;
 	bool m_dma_on = false;
 	bool m_normal_mode = false;
+	int m_cent_busy = 0;
+	int m_cent_ack = 1;
 	uint8_t m_mmu_mode = 0;  // shadow of the MMU mode register
 	uint8_t m_vi_lines = 0;
 	uint32_t m_vram_start;
@@ -168,6 +177,14 @@ void c900_state::sound_pb_w(u8 data)
 void c900_state::kbd_pc_w(u8 data)
 {
 	m_kbd->kbdclr_w(BIT(data, 3)); // PC3 = KBDCLR
+}
+
+uint8_t c900_state::cio1_pc_r() {
+	return (m_kbd->pc_r() & ~0x01) | m_cent_busy;
+}
+
+uint8_t c900_state::cio2_pb_r() {
+	return m_cent_ack << 1;
 }
 
 void c900_state::phys_mem_map(address_map &map)
@@ -446,13 +463,27 @@ void c900_state::c900(machine_config &config, unsigned vram_start, unsigned vram
 	PALETTE(config, "palette", palette_device::MONOCHROME);*/
 
 	Z8036(config, m_cio1, 12_MHz_XTAL / 2); // PCLK; Coherent derives its 100 Hz tick from this
-	m_cio1->irq_wr_cb().set(FUNC(c900_state::vi_w<VI_CIO>));
+	m_cio1->irq_wr_cb().set(FUNC(c900_state::vi_w<VI_CIO1>));
 	m_cio1->pc_wr_cb().set(FUNC(c900_state::kbd_pc_w));
 	m_cio1->pa_rd_cb().set(m_kbd, FUNC(c900_kbd_device::pa_r));
-	m_cio1->pc_rd_cb().set(m_kbd, FUNC(c900_kbd_device::pc_r));
+	m_cio1->pb_wr_cb().set(m_cent_data, FUNC(output_latch_device::write));
+	m_cio1->pc_rd_cb().set(FUNC(c900_state::cio1_pc_r));
 
 	Z8036(config, m_cio2, 12_MHz_XTAL / 2); // U66, tested by the boot ROM as "CIO2"; IEEE-488 interface?
 	m_cio2->pb_wr_cb().set(FUNC(c900_state::sound_pb_w));
+	m_cio2->pb_rd_cb().set(FUNC(c900_state::cio2_pb_r));
+	m_cio2->pc_wr_cb().set(m_centronics,
+		FUNC(centronics_device::write_strobe)
+	).bit(3);
+	m_cio2->irq_wr_cb().set(FUNC(c900_state::vi_w<VI_CIO2>));
+
+	CENTRONICS(config, m_centronics, centronics_devices, "printer");
+	m_centronics->busy_handler().set([this] (int state) { m_cent_busy = state; });
+	m_centronics->ack_handler().set([this] (int state) { m_cent_ack = state; });
+	m_centronics->ack_handler().append(m_cio2, FUNC(z8036_device::pb1_w));
+
+	OUTPUT_LATCH(config, m_cent_data);
+	m_centronics->set_output_latch(*m_cent_data);
 
 	scc8030_device &scc(SCC8030(config, "scc", 12_MHz_XTAL / 2)); // 5'850'000 is the ideal figure
 	/* Port B */
