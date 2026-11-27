@@ -334,7 +334,9 @@ u8 cio_base_device::read_register(offs_t offset)
 
 	case PORT_C_DATA:
 		// TODO: take data path polarity into account
-		data = 0xf0 | (m_read_pc() & 0x0f);
+		// output bits read back the output register, input bits the pins
+		data = 0xf0 | (((m_output[PORT_C] & ~m_register[PORT_C_DATA_DIRECTION]) |
+				(m_read_pc() & m_register[PORT_C_DATA_DIRECTION])) & 0x0f);
 		break;
 
 	case PORT_A_COMMAND_AND_STATUS:
